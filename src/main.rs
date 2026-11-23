@@ -1,3 +1,4 @@
+pub mod hcr_server;
 mod hcr;
 #[allow(dead_code)]
 mod protocol;
@@ -62,6 +63,13 @@ async fn main() -> Result<(), Error> {
         // QUIC permanece desativado: o binário não possui um listener QUIC real.
     }
 
+    if hcr_enabled {
+        tokio::spawn(async move {
+            if let Err(e) = hcr_server::start("127.0.0.1:8881", "127.0.0.1:22").await {
+                eprintln!("[HCR] Erro no servidor nativo: {}", e);
+            }
+        });
+    }
     let listener = TcpListener::bind(format!("[::]:{}", port)).await?;
     println!("Aguardando conexoes TCP...");
     start_http(
