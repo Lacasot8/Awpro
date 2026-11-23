@@ -8,6 +8,7 @@ mod ssh;
 mod tcp_fallback;
 mod tls;
 mod websocket;
+mod hcr;
 
 use protocol::Protocol;
 use std::env;

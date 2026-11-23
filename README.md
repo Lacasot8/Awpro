@@ -1,5 +1,11 @@
 # Mpro v2.0 - com suporte xHTTP (SplitHTTP)
 
+## Núcleo HCR independente em validação
+
+O repositório contém `src/hcr.rs`, um núcleo Rust independente para validar o enquadramento binário observado no cliente HCR. Ele valida os seis opcodes, a versão 1, o cabeçalho de 62 bytes e o comprimento big-endian no offset 58, com limite de payload de 262140 bytes e testes unitários. O módulo não baixa, incorpora nem executa `assets/hcr-server-linux-amd64.tar.gz`.
+
+Esse núcleo ainda não substitui o servidor HCR usado em produção. A autenticação e a negociação de sessão do APK são feitas pelo motor nativo `bilola/internal/hcr`; sem uma captura real de uma sessão cliente-servidor, ativar um servidor incompleto poderia causar novamente EOF no YouTube e no Speedtest. Por isso o caminho atual do menu permanece preservado até a sessão, upload, download e reconexão serem comprovados.
+
 Proxy multi-protocolo em Rust com suporte exclusivo para o protocolo xHTTP (SplitHTTP) na porta 443, compatível com o cliente **XHTTP-DEMO**.
 
 ## O que mudou na v2.0
