@@ -18,10 +18,10 @@ HCR_SSH_TARGET="127.0.0.1:22"
 # 20s reduz a espera de polling para evitar resets em operadoras móveis.
 HCR_DOWNLOAD_POLL_TIMEOUT="20s"
 # 16 KiB é o frame mais compatível com clientes HCR e redes móveis.
-HCR_DOWNLOAD_FRAME="16384"
+HCR_DOWNLOAD_FRAME="65536"
 HCR_MAX_CONNECTIONS="4096"
-HCR_MAX_SESSIONS="128"
-HCR_MAX_SESSIONS_PER_IP="64"
+HCR_MAX_SESSIONS="1024"
+HCR_MAX_SESSIONS_PER_IP="1024"
 HCR_BINARY_CANDIDATES=("${BYPASS_DIR}/hcr-server" "/opt/hcr-server/hcr-server" "/usr/local/bin/hcr-server" "/usr/bin/hcr-server")
 # Fonte pública do binário oficial hcr-server (Linux amd64). Pode ser trocada
 # exportando HCR_SOURCE_URL antes de abrir o menu.
@@ -641,58 +641,57 @@ hcr_apply_download_frame_tuning() {
 }
 
 hcr_apply_capacity_tuning() {
-    local BINARY="$1" SERVICE_FILE="$2" HELP="" BACKUP="" HAS_CAPACITY=false
-
+    local BINARY="$1" SERVICE_FILE="$2" HELP="" BACKUP="" FLAG="" VALUE="" CHANGED=false
+    local -a FLAGS=() VALUES=()
+    local I
     [[ -x "$BINARY" && -f "$SERVICE_FILE" ]] || return 0
     HELP=$(timeout 5 "$BINARY" -h 2>&1 </dev/null) || true
-    grep -q -- "-max-connections" <<<"$HELP" && HAS_CAPACITY=true
-    grep -q -- "-max-sessions int" <<<"$HELP" && HAS_CAPACITY=true
-    grep -q -- "-max-sessions-per-ip" <<<"$HELP" && HAS_CAPACITY=true
-    [[ "$HAS_CAPACITY" == true ]] || return 0
+    grep -q -- "-max-connections" <<<"$HELP" && { FLAGS+=("max-connections"); VALUES+=("$HCR_MAX_CONNECTIONS"); }
+    grep -q -- "-max-sessions int" <<<"$HELP" && { FLAGS+=("max-sessions"); VALUES+=("$HCR_MAX_SESSIONS"); }
+    grep -q -- "-max-sessions-per-ip" <<<"$HELP" && { FLAGS+=("max-sessions-per-ip"); VALUES+=("$HCR_MAX_SESSIONS_PER_IP"); }
+    (( ${#FLAGS[@]} > 0 )) || return 0
     grep -Eq '^[[:space:]]*ExecStart=.*hcr-server' "$SERVICE_FILE" || return 0
-
-    if grep -q -- "-max-connections" <<<"$HELP" && ! grep -Eq '^[[:space:]]*ExecStart=.*-max-connections[[:space:]]+4096([[:space:]]|$)' "$SERVICE_FILE"; then
-        :
-    elif grep -q -- "-max-sessions int" <<<"$HELP" && ! grep -Eq '^[[:space:]]*ExecStart=.*-max-sessions[[:space:]]+128([[:space:]]|$)' "$SERVICE_FILE"; then
-        :
-    elif grep -q -- "-max-sessions-per-ip" <<<"$HELP" && ! grep -Eq '^[[:space:]]*ExecStart=.*-max-sessions-per-ip[[:space:]]+64([[:space:]]|$)' "$SERVICE_FILE"; then
-        :
-    else
-        return 0
-    fi
-
+    for I in "${!FLAGS[@]}"; do
+        grep -Eq "^[[:space:]]*ExecStart=.*-${FLAGS[$I]}[[:space:]]+${VALUES[$I]}([[:space:]]|$)" "$SERVICE_FILE" || CHANGED=true
+    done
+    [[ "$CHANGED" == true ]] || return 0
     BACKUP="${SERVICE_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
     cp -a -- "$SERVICE_FILE" "$BACKUP" || return 1
-    if grep -q -- "-max-connections" <<<"$HELP"; then
-        if grep -Eq '^[[:space:]]*ExecStart=.*-max-connections([=[:space:]]|$)' "$SERVICE_FILE"; then
-            sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ { s/(-{1,2}max-connections)=([0-9]+)/\1 4096/; s/(-{1,2}max-connections)[[:space:]]+[0-9]+/\1 4096/; }' "$SERVICE_FILE"
+    for I in "${!FLAGS[@]}"; do
+        FLAG="${FLAGS[$I]}" VALUE="${VALUES[$I]}"
+        # "-max-sessions" não pode casar com "-max-sessions-per-ip".
+        if grep -Eq "^[[:space:]]*ExecStart=.*-${FLAG}([=[:space:]]|$)" "$SERVICE_FILE"; then
+            sed -i -E "/^[[:space:]]*ExecStart=.*hcr-server/ { s/(-{1,2}${FLAG})=([0-9]+)/\\1 ${VALUE}/; s/(-{1,2}${FLAG})[[:space:]]+[0-9]+/\\1 ${VALUE}/; }" "$SERVICE_FILE"
         else
-            sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ s/[[:space:]]*$/ -max-connections 4096/' "$SERVICE_FILE"
+            sed -i -E "/^[[:space:]]*ExecStart=.*hcr-server/ s/[[:space:]]*$/ -${FLAG} ${VALUE}/" "$SERVICE_FILE"
         fi
-    fi
-    if grep -q -- "-max-sessions int" <<<"$HELP"; then
-        if grep -Eq '^[[:space:]]*ExecStart=.*-max-sessions([=[:space:]]|$)' "$SERVICE_FILE"; then
-            sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ { s/(-{1,2}max-sessions)=([0-9]+)/\1 128/; s/(-{1,2}max-sessions)[[:space:]]+[0-9]+/\1 128/; }' "$SERVICE_FILE"
-        else
-            sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ s/[[:space:]]*$/ -max-sessions 128/' "$SERVICE_FILE"
-        fi
-    fi
-    if grep -q -- "-max-sessions-per-ip" <<<"$HELP"; then
-        if grep -Eq '^[[:space:]]*ExecStart=.*-max-sessions-per-ip([=[:space:]]|$)' "$SERVICE_FILE"; then
-            sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ { s/(-{1,2}max-sessions-per-ip)=([0-9]+)/\1 64/; s/(-{1,2}max-sessions-per-ip)[[:space:]]+[0-9]+/\1 64/; }' "$SERVICE_FILE"
-        else
-            sed -i -E '/^[[:space:]]*ExecStart=.*hcr-server/ s/[[:space:]]*$/ -max-sessions-per-ip 64/' "$SERVICE_FILE"
-        fi
-    fi
+    done
     if systemctl daemon-reload >/dev/null 2>&1; then
-        echo -e "${GREEN}Limites HCR ajustados: 4096 conexões, 128 sessões e 64 sessões por origem.${NC}"
+        echo -e "${GREEN}Limites HCR ajustados: ${HCR_MAX_CONNECTIONS} conexões, ${HCR_MAX_SESSIONS} sessões e ${HCR_MAX_SESSIONS_PER_IP} sessões por origem.${NC}"
         return 0
     fi
     cp -a -- "$BACKUP" "$SERVICE_FILE"
     systemctl daemon-reload >/dev/null 2>&1 || true
     return 1
 }
-
+# Após atualizar pelo GitHub, reaplica frame/limites na unit HCR existente e
+# reinicia o HCR uma única vez se algo mudou. Sem isso, a unit antiga (64
+# sessões por origem) continuaria valendo e, pela opção H, todos os clientes
+# chegam ao HCR como 127.0.0.1.
+hcr_reconcile_runtime_tuning() {
+    local SERVICE_FILE="${SYSTEMD_DIR}/${HCR_SERVICE}" BINARY="" BEFORE="" AFTER=""
+    [[ "$EUID" -eq 0 && -f "$SERVICE_FILE" ]] || return 0
+    command -v systemctl >/dev/null 2>&1 || return 0
+    BINARY=$(sed -n -E 's/^[[:space:]]*ExecStart=([^[:space:]]+).*/\1/p' "$SERVICE_FILE" | head -n 1)
+    [[ -x "$BINARY" ]] || return 0
+    BEFORE=$(sha256sum "$SERVICE_FILE" 2>/dev/null)
+    hcr_apply_download_frame_tuning "$BINARY" "$SERVICE_FILE" >/dev/null 2>&1 || true
+    hcr_apply_capacity_tuning "$BINARY" "$SERVICE_FILE" >/dev/null 2>&1 || true
+    AFTER=$(sha256sum "$SERVICE_FILE" 2>/dev/null)
+    if [[ "$BEFORE" != "$AFTER" ]] && systemctl is-active --quiet "$HCR_SERVICE" 2>/dev/null; then
+        systemctl restart "$HCR_SERVICE" >/dev/null 2>&1 || true
+    fi
+}
 hcr_port_busy() {
     ss -lntH 2>/dev/null | awk '{print $4}' | grep -Eq "[:.]$1$"
 }
@@ -2034,6 +2033,7 @@ migrate_legacy_multiprotocol_state
 
  # Reaplica drop-ins HCR de portas já habilitadas após atualização ou reboot.
 hcr_reconcile_proxy_dependencies
+hcr_reconcile_runtime_tuning
 
 while true; do
     show_menu
