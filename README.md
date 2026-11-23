@@ -2,9 +2,11 @@
 
 ## Núcleo HCR independente em validação
 
-O repositório contém `src/hcr.rs`, um núcleo Rust independente para validar o enquadramento binário observado no cliente HCR. Ele valida os seis opcodes, a versão 1, o cabeçalho de 62 bytes e o comprimento big-endian no offset 58, com limite de payload de 262140 bytes e testes unitários. O módulo não baixa, incorpora nem executa `assets/hcr-server-linux-amd64.tar.gz`.
+O repositório contém `src/hcr.rs`, um núcleo Rust independente para validar o enquadramento binário observado no cliente HCR. O cabeçalho de request tem 62 bytes: opcode, versão 1, SessionID de 16 bytes, token de 32 bytes, sequência uint64 big-endian nos bytes 50–57 e comprimento big-endian nos bytes 58–61. O limite de payload observado é 262144 bytes. O módulo ainda não implementa autenticação, ciclo de sessão, upload/download nem substitui o servidor HCR usado em produção; não baixa, incorpora nem executa binários de terceiros.
 
-Esse núcleo ainda não substitui o servidor HCR usado em produção. A autenticação e a negociação de sessão do APK são feitas pelo motor nativo `bilola/internal/hcr`; sem uma captura real de uma sessão cliente-servidor, ativar um servidor incompleto poderia causar novamente EOF no YouTube e no Speedtest. Por isso o caminho atual do menu permanece preservado até a sessão, upload, download e reconexão serem comprovados.
+Em runtime, a opção H nas portas 80/8080 reconhece o frame e encaminha o fluxo TCP intacto para `127.0.0.1:8880`; ela não cria por si só um servidor HCR independente. Uma conexão direta do APK para a porta 8880 não percorre esse relay do AWpro. O menu ainda depende de um backend HCR instalado separadamente.
+
+Esse núcleo ainda não substitui o servidor HCR usado em produção. A análise estática do APK identificou o campo de token e o layout do frame, mas não comprovou a autenticação nem a semântica de todas as operações e da reconexão. Sem esses detalhes — idealmente confirmados por uma captura autorizada de sessão cliente-servidor — ativar um servidor incompleto poderia causar EOF em clientes como YouTube e Speedtest. Por isso, o caminho atual do menu permanece preservado até o ciclo de sessão, upload, download e reconexão serem comprovados.
 
 Proxy multi-protocolo em Rust com suporte exclusivo para o protocolo xHTTP (SplitHTTP) na porta 443, compatível com o cliente **XHTTP-DEMO**.
 

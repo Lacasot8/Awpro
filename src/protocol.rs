@@ -1,3 +1,6 @@
+use crate::hcr::{
+    HEADER_LEN as HCR_HEADER_SIZE, MAX_PAYLOAD as HCR_MAX_PAYLOAD, VERSION as HCR_VERSION,
+};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use std::io;
 use tokio::net::TcpStream;
@@ -5,8 +8,6 @@ use tokio::time::{sleep, timeout, Duration};
 
 const MAX_PEEK: usize = 16 * 1024;
 const DETECT_TIMEOUT: Duration = Duration::from_millis(800);
-const HCR_HEADER_SIZE: usize = 62;
-const HCR_MAX_PAYLOAD: u32 = 262_144;
 const HCR_FIRST_BYTE_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,14 +241,14 @@ fn sniff_hcr_frame(data: &[u8]) -> Option<bool> {
     if data.len() < 2 {
         return None;
     }
-    if data[1] != 0x01 {
+    if data[1] != HCR_VERSION {
         return Some(false);
     }
     if data.len() < HCR_HEADER_SIZE {
         return None;
     }
     let payload_len = u32::from_be_bytes([data[58], data[59], data[60], data[61]]);
-    Some(payload_len <= HCR_MAX_PAYLOAD)
+    Some((payload_len as usize) <= HCR_MAX_PAYLOAD)
 }
 
 fn is_socks4_prefix(data: &[u8]) -> bool {
@@ -345,9 +346,12 @@ fn starts_with_ascii_case_insensitive(data: &[u8], prefix: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_after_protocol_timeout, detect_protocol, has_expect_continue,
+        classify_after_protocol_timeout, detect_hcr_only, detect_protocol, has_expect_continue,
         is_incomplete_http_message, Protocol, HCR_HEADER_SIZE, HCR_MAX_PAYLOAD,
     };
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::time::{sleep, Duration};
 
     #[test]
     fn detects_binary_and_raw_protocol_signatures() {
@@ -377,8 +381,32 @@ mod tests {
         hcr[0] = 1;
         assert_eq!(detect_protocol(&hcr[..2]), None);
 
-        hcr[58..62].copy_from_slice(&(HCR_MAX_PAYLOAD + 1).to_be_bytes());
+        hcr[58..62].copy_from_slice(&((HCR_MAX_PAYLOAD as u32) + 1).to_be_bytes());
         assert_eq!(detect_protocol(&hcr), None);
+    }
+
+    #[tokio::test]
+    async fn detects_fragmented_hcr_header_without_consuming_request_bytes() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(addr).await.unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+
+        let mut header = [0u8; HCR_HEADER_SIZE];
+        header[0] = 5; // Também coincide com o primeiro byte de um handshake SOCKS5.
+        header[1] = 1;
+        let writer = tokio::spawn(async move {
+            client.write_all(&header[..7]).await.unwrap();
+            sleep(Duration::from_millis(25)).await;
+            client.write_all(&header[7..]).await.unwrap();
+            header
+        });
+
+        assert!(detect_hcr_only(&server).await.unwrap());
+        let header = writer.await.unwrap();
+        let mut peeked = [0u8; HCR_HEADER_SIZE];
+        assert_eq!(server.peek(&mut peeked).await.unwrap(), HCR_HEADER_SIZE);
+        assert_eq!(peeked, header);
     }
 
     #[test]

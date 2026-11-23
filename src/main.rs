@@ -1,3 +1,4 @@
+mod hcr;
 #[allow(dead_code)]
 mod protocol;
 mod relay;
@@ -8,7 +9,6 @@ mod ssh;
 mod tcp_fallback;
 mod tls;
 mod websocket;
-mod hcr;
 
 use protocol::Protocol;
 use std::env;
@@ -125,7 +125,7 @@ async fn handle_client_protocol(
     // detecte apenas um frame HCR real; tráfego normal deve seguir direto
     // para o handshake HTTP da opção 1.
     if hcr_enabled && !multiprotocol_enabled && protocol::detect_hcr_only(&client_stream).await? {
-        println!("[HCR] Frame detectado; encaminhando ao servidor oficial");
+        println!("[HCR] Frame detectado; encaminhando ao backend local");
         return tls::handle_hcr(client_stream)
             .await
             .map_err(|e| Error::new(ErrorKind::Other, format!("HCR: {e}")));
@@ -550,8 +550,8 @@ fn has_arg(arg: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        bypass_enabled_in, find_http_header_end, http_handshake_followup,
-        hcr_enabled_in, http_status_response, multiprotocol_enabled_in, option_one_followup,
+        bypass_enabled_in, find_http_header_end, hcr_enabled_in, http_handshake_followup,
+        http_status_response, multiprotocol_enabled_in, option_one_followup,
         option_one_initial_response, strip_http_decoy_prefix,
     };
     use std::path::Path;

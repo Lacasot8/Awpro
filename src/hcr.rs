@@ -1,14 +1,15 @@
 //! Núcleo independente de framing HCR.
 //!
 //! O APK analisado usa frames binários com cabeçalho de 62 bytes: opcode,
-//! versão e comprimento big-endian no offset 58. Este módulo não contém o
+//! versão, sessão de 16 bytes, token de 32 bytes, sequência uint64 no offset 50
+//! e comprimento big-endian no offset 58. Este módulo não contém o
 //! binário oficial nem faz download de assets. Ele fica isolado até que a
 //! autenticação/sessão do cliente seja validada com uma captura real do APK.
 
 use std::io::{self, Error, ErrorKind};
 
 pub const HEADER_LEN: usize = 62;
-pub const MAX_PAYLOAD: usize = 262_140;
+pub const MAX_PAYLOAD: usize = 262_144;
 pub const VERSION: u8 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,13 +26,21 @@ impl Frame {
             return Err(Error::new(ErrorKind::InvalidInput, "opcode HCR inválido"));
         }
         if payload.len() > MAX_PAYLOAD {
-            return Err(Error::new(ErrorKind::InvalidInput, "payload HCR excede o limite"));
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "payload HCR excede o limite",
+            ));
         }
         let mut header = [0u8; HEADER_LEN];
         header[0] = opcode;
         header[1] = VERSION;
         header[58..62].copy_from_slice(&(payload.len() as u32).to_be_bytes());
-        Ok(Self { opcode, version: VERSION, header, payload })
+        Ok(Self {
+            opcode,
+            version: VERSION,
+            header,
+            payload,
+        })
     }
 
     pub fn encoded(&self) -> Vec<u8> {
@@ -49,16 +58,37 @@ impl Frame {
             return Err(Error::new(ErrorKind::InvalidData, "opcode HCR inválido"));
         }
         if version != VERSION {
-            return Err(Error::new(ErrorKind::InvalidData, "versão HCR não suportada"));
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "versão HCR não suportada",
+            ));
         }
         if declared > MAX_PAYLOAD || declared != payload.len() {
-            return Err(Error::new(ErrorKind::InvalidData, "tamanho de payload HCR inválido"));
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "tamanho de payload HCR inválido",
+            ));
         }
-        Ok(Self { opcode, version, header, payload })
+        Ok(Self {
+            opcode,
+            version,
+            header,
+            payload,
+        })
     }
 
-    pub fn session_id(&self) -> &[u8] { &self.header[2..18] }
-    pub fn sequence_bytes(&self) -> &[u8] { &self.header[18..26] }
+    pub fn session_id(&self) -> &[u8] {
+        &self.header[2..18]
+    }
+    pub fn token(&self) -> &[u8] {
+        &self.header[18..50]
+    }
+    pub fn sequence_bytes(&self) -> &[u8] {
+        &self.header[50..58]
+    }
+    pub fn sequence(&self) -> u64 {
+        u64::from_be_bytes(self.header[50..58].try_into().unwrap())
+    }
 }
 
 #[cfg(test)]
@@ -67,13 +97,29 @@ mod tests {
 
     #[test]
     fn round_trip_preserves_header_and_payload() {
-        let frame = Frame::new(2, b"ssh-data".to_vec()).unwrap();
+        let mut frame = Frame::new(2, b"ssh-data".to_vec()).unwrap();
+        frame.header[2..18].copy_from_slice(b"session-id-12345");
+        frame.header[18..50].copy_from_slice(&[0xA5; 32]);
+        frame.header[50..58].copy_from_slice(&0x0102_0304_0506_0708u64.to_be_bytes());
         let bytes = frame.encoded();
         let mut header = [0u8; HEADER_LEN];
         header.copy_from_slice(&bytes[..HEADER_LEN]);
         let parsed = Frame::parse(header, bytes[HEADER_LEN..].to_vec()).unwrap();
         assert_eq!(parsed, frame);
         assert_eq!(u32::from_be_bytes(header[58..62].try_into().unwrap()), 8);
+        assert_eq!(parsed.session_id(), b"session-id-12345");
+        assert_eq!(parsed.token(), &[0xA5; 32]);
+        assert_eq!(parsed.sequence(), 0x0102_0304_0506_0708);
+    }
+
+    #[test]
+    fn accepts_client_maximum_payload() {
+        let frame = Frame::new(6, vec![0x5A; MAX_PAYLOAD]).unwrap();
+        assert_eq!(frame.payload.len(), 262_144);
+        assert_eq!(
+            u32::from_be_bytes(frame.header[58..62].try_into().unwrap()),
+            262_144
+        );
     }
 
     #[test]
