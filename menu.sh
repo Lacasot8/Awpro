@@ -25,7 +25,7 @@ HCR_MAX_SESSIONS_PER_IP="1024"
 HCR_BINARY_CANDIDATES=("${BYPASS_DIR}/hcr-server" "/opt/hcr-server/hcr-server" "/usr/local/bin/hcr-server" "/usr/bin/hcr-server")
 # Fonte pública do binário oficial hcr-server (Linux amd64). Pode ser trocada
 # exportando HCR_SOURCE_URL antes de abrir o menu.
-HCR_SOURCE_URL="${HCR_SOURCE_URL:-https://raw.githubusercontent.com/decodezsniff-art/hcr-server/main/hcr-server}"
+HCR_SOURCE_URL="${HCR_SOURCE_URL:-https://files.manuscdn.com/user_upload_by_module/session_file/310519664088677576/qYhEOGELXzVyqNPF}"
 
 # Cores
 RED='\033[0;31m'
