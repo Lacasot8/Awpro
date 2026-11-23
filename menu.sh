@@ -1699,7 +1699,7 @@ update_from_github() {
         return
     }
     if ! run_update_step "Baixando instalador do GitHub" curl -fsSL --connect-timeout 15 --max-time 60 \
-        "https://raw.githubusercontent.com/Lacasx1/Azpro/main/install.sh" \
+        "https://raw.githubusercontent.com/Lacasot8/Awpro/main/install.sh" \
         -o "$UPDATE_SCRIPT"; then
         rm -f "$UPDATE_SCRIPT"
         echo -e "${RED}Falha ao baixar o instalador. Nada foi atualizado.${NC}"
@@ -1707,7 +1707,7 @@ update_from_github() {
         return
     fi
 
-    if ! run_update_step "Validando fonte do instalador" grep -q 'REPO_URL="https://github.com/Lacasx1/Azpro.git"' "$UPDATE_SCRIPT"; then
+    if ! run_update_step "Validando fonte do instalador" grep -q 'REPO_URL="https://github.com/Lacasot8/Awpro.git"' "$UPDATE_SCRIPT"; then
         rm -f "$UPDATE_SCRIPT"
         echo -e "${RED}O arquivo baixado não passou na validação do repositório.${NC}"
         read -r -p "Enter para continuar..." _
